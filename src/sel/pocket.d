@@ -1,7 +1,7 @@
 ﻿module sel.pocket;
 
 import std.conv : to;
-import std.datetime : Duration, dur, StopWatch;
+import std.datetime : Duration, StopWatch;
 import std.socket;
 import std.string : split;
 
@@ -24,11 +24,11 @@ class PocketClient(uint __protocol) : Client {
 		super(name);
 	}
 
-	public final override pure nothrow @property @safe @nogc ushort defaultPort() {
+	public override pure nothrow @property @safe @nogc ushort defaultPort() {
 		return ushort(19132);
 	}
 
-	protected override Server pingImpl(Address address, Duration timeout) {
+	protected override Server pingImpl(Address address, string ip, ushort port, Duration timeout) {
 		Socket socket = new UdpSocket(address.addressFamily);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, timeout);
@@ -50,8 +50,6 @@ class PocketClient(uint __protocol) : Client {
 
 unittest {
 
-	alias Pocket112 = PocketClient!112;
-
-	auto pocket = new Pocket112("unittest");
+	auto pocket = new PocketClient!112("unittest");
 
 }
