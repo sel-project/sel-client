@@ -1,10 +1,10 @@
-﻿module sel.client;
+﻿module sel.client.client;
 
 import std.conv : to;
 import std.datetime : Duration, dur;
 import std.socket : Address, InternetAddress;
 
-import sel.server : Server;
+import sel.client.server : Server;
 
 class Client {
 
@@ -30,7 +30,7 @@ class Client {
 	 * ---
 	 * client.ping("127.0.0.1");
 	 * client.ping("mc.hypixel.net", 25565);
-	 * client.pinf("localhost", dur!"seconds"(1));
+	 * client.ping("localhost", dur!"seconds"(1));
 	 * ---
 	 */
 	public final const(Server) ping(Address address, Duration timeout=dur!"seconds"(5)) {
@@ -48,5 +48,19 @@ class Client {
 	}
 
 	protected abstract Server pingImpl(Address address, string ip, ushort port, Duration timeout);
+
+	public bool connect(Address address, Duration timeout=dur!"seconds"(5)) {
+		return this.connectImpl(address, address.toAddrString(), to!ushort(address.toPortString()), timeout);
+	}
+
+	public bool connect(string ip, ushort port, Duration timeout=dur!"seconds"(5)) {
+		return this.connectImpl(new InternetAddress(ip, port), ip, port, timeout);
+	}
+
+	public bool connect(string ip, Duration timeout=dur!"seconds"(5)) {
+		return this.connect(ip, this.defaultPort, timeout);
+	}
+
+	protected abstract bool connectImpl(Address address, string ip, ushort port, Duration timeout);
 
 }

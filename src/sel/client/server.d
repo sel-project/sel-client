@@ -1,4 +1,4 @@
-﻿module sel.server;
+﻿module sel.client.server;
 
 import std.conv : to;
 import std.regex : ctRegex, replaceAll;

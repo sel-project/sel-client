@@ -1,5 +1,5 @@
 name "sel-client"
-description "Client for Minecraft: Pocket Edition"
+description "Client for Minecraft and Minecraft: Pocket Edition"
 authors "sel-project"
 license "LGPL-3"
 dependency "sel-utils" version="==1.2.27"

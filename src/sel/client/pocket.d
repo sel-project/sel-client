@@ -1,12 +1,12 @@
-﻿module sel.pocket;
+﻿module sel.client.pocket;
 
 import std.conv : to;
 import std.datetime : Duration, StopWatch;
 import std.socket;
 import std.string : split;
 
-import sel.client : Client;
-import sel.server : Server;
+import sel.client.client : Client;
+import sel.client.server : Server;
 
 import RaknetTypes = sul.protocol.raknet8.types;
 import Control = sul.protocol.raknet8.control;
@@ -44,6 +44,10 @@ class PocketClient(uint __protocol) : Client {
 			}
 		}
 		return Server.init;
+	}
+
+	protected override bool connectImpl(Address address, string ip, ushort port, Duration timeout) {
+		return false;
 	}
 
 }
