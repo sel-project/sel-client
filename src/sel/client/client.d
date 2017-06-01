@@ -4,7 +4,9 @@ import std.conv : to;
 import std.datetime : Duration, dur;
 import std.socket : Address, InternetAddress;
 
-import sel.client.server : Server;
+import sel.client.util : Server;
+
+enum isSupported(string type, uint protocol) = __traits(compiles, { mixin("import sul.attributes." ~ type ~ to!string(protocol) ~ ";"); });
 
 class Client {
 

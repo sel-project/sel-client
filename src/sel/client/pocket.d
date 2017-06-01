@@ -1,12 +1,27 @@
-﻿module sel.client.pocket;
+﻿/*
+ * Copyright (c) 2017 SEL
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU Lesser General Public License for more details.
+ * 
+ */
+module sel.client.pocket;
 
 import std.conv : to;
 import std.datetime : Duration, StopWatch;
+import std.random : uniform;
 import std.socket;
 import std.string : split;
 
-import sel.client.client : Client;
-import sel.client.server : Server;
+import sel.client.client : isSupported, Client;
+import sel.client.util : Server;
 
 import RaknetTypes = sul.protocol.raknet8.types;
 import Control = sul.protocol.raknet8.control;
@@ -15,13 +30,26 @@ import Unconnected = sul.protocol.raknet8.unconnected;
 
 enum ubyte[16] __magic = [0x00, 0xFF, 0xFF, 0x00, 0xFE, 0xFE, 0xFE, 0xFE, 0xFD, 0xFD, 0xFD, 0xFD, 0x12, 0x34, 0x56, 0x78];
 
-class PocketClient(uint __protocol) : Client {
+class PocketClient(uint __protocol) : Client if(isSupported!("pocket", __protocol)) {
+
+	public static string randomUsername() {
+		enum char[] pool = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ".dup;
+		char[] ret = new char[uniform!"[]"(1, 15)];
+		foreach(ref c ; ret) {
+			c = pool[uniform(0, $)];
+		}
+		return ret.idup;
+	}
 
 	mixin("import Play = sul.protocol.pocket" ~ to!string(__protocol) ~ ".play;");
 	mixin("import Types = sul.protocol.pocket" ~ to!string(__protocol) ~ ".types;");
 
 	public this(string name) {
 		super(name);
+	}
+
+	public this() {
+		this(randomUsername());
 	}
 
 	public override pure nothrow @property @safe @nogc ushort defaultPort() {

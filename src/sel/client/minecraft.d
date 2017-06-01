@@ -1,4 +1,18 @@
-﻿module sel.client.minecraft;
+﻿/*
+ * Copyright (c) 2017 SEL
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU Lesser General Public License for more details.
+ * 
+ */
+module sel.client.minecraft;
 
 import std.conv : to;
 import std.datetime : Duration, StopWatch;
@@ -8,14 +22,16 @@ import std.socket;
 import std.uuid : UUID, parseUUID;
 import std.zlib : UnCompress;
 
-import sel.client.client : Client;
-import sel.client.server : Server;
+import sel.client.client : isSupported, Client;
+import sel.client.util : Server, Stream;
 
 import sul.utils.var : varuint;
 
 import std.stdio : writeln;
 
-class MinecraftClient(uint __protocol) : Client {
+alias MinecraftStream = Stream!varuint;
+
+class MinecraftClient(uint __protocol) : Client if(isSupported!("minecraft", __protocol)) {
 
 	public static string randomUsername() {
 		enum char[] pool = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_".dup;
@@ -60,10 +76,11 @@ class MinecraftClient(uint __protocol) : Client {
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, timeout);
 		socket.connect(address);
 		socket.blocking = true;
+		MinecraftStream stream = new MinecraftStream(socket);
 		// require status
-		socket.send(addLength(new Status.Handshake(__protocol, ip, port, Status.Handshake.STATUS).encode()));
-		socket.send(addLength(new Status.Request().encode()));
-		ubyte[] packet = receive(socket);
+		stream.send(new Status.Handshake(__protocol, ip, port, Status.Handshake.STATUS).encode());
+		stream.send(new Status.Request().encode());
+		ubyte[] packet = stream.receive();
 		if(packet.length && packet[0] == Status.Response.ID) {
 			auto json = parseJSON(Status.Response.fromBuffer(packet).json);
 			if(json.type == JSON_TYPE.OBJECT) {
@@ -95,8 +112,8 @@ class MinecraftClient(uint __protocol) : Client {
 				// ping
 				StopWatch timer;
 				timer.start();
-				socket.send(addLength(new Status.Latency(0).encode()));
-				packet = receive(socket);
+				stream.send(new Status.Latency(0).encode());
+				packet = stream.receive();
 				if(packet.length == 9 && packet[0] == Status.Latency.ID) {
 					timer.stop();
 					server.ping = timer.peek.msecs;
@@ -115,16 +132,17 @@ class MinecraftClient(uint __protocol) : Client {
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, timeout);
 		socket.connect(address);
 		socket.blocking = true;
+		MinecraftStream stream = new MinecraftStream(socket);
 		// handshake
-		socket.send(addLength(new Status.Handshake(__protocol, ip, port, Status.Handshake.LOGIN).encode()));
-		socket.send(addLength(new Login.LoginStart(this.name).encode()));
-		ubyte[] packet = receive(socket);
+		stream.send(new Status.Handshake(__protocol, ip, port, Status.Handshake.LOGIN).encode());
+		stream.send(new Login.LoginStart(this.name).encode());
+		ubyte[] packet = stream.receive();
 		if(packet.length) {
 			if(packet[0] == Login.EncryptionRequest.ID) {
 				this._lasterror = "Encryption required";
 			} else if(packet[0] == Login.SetCompression.ID) {
 				this.compressionThresold = Login.SetCompression.fromBuffer(packet).thresold;
-				packet = receiveCompressed(socket);
+				packet = receiveCompressed(stream);
 				if(packet.length) {
 					if(packet[0] == Login.Disconnect.ID) {
 						this._lasterror = "Disconnected: " ~ chatToString(parseJSON(Login.Disconnect.fromBuffer(packet).reason));
@@ -132,7 +150,7 @@ class MinecraftClient(uint __protocol) : Client {
 						auto ls = Login.LoginSuccess.fromBuffer(packet);
 						if(ls.username == this.name) {
 							this.uuid = parseUUID(ls.uuid);
-							this.startGameLoop(socket);
+							this.startGameLoop(stream);
 							return true;
 						} else {
 							this._lasterror = "Username mismatch";
@@ -147,12 +165,12 @@ class MinecraftClient(uint __protocol) : Client {
 		return false;
 	}
 
-	private void startGameLoop(Socket socket) {
+	private void startGameLoop(MinecraftStream stream) {
 		while(true) {
-			auto packet = receiveCompressed(socket);
+			auto packet = receiveCompressed(stream);
 			if(packet.length) {
 				if(packet[0] == Clientbound.KeepAlive.ID) {
-					socket.send(addLength([ubyte.init] ~ new Serverbound.KeepAlive(Clientbound.KeepAlive.fromBuffer(packet).id).encode()));
+					stream.send([ubyte.init] ~ new Serverbound.KeepAlive(Clientbound.KeepAlive.fromBuffer(packet).id).encode());
 				} else {
 					//TODO call handler
 				}
@@ -162,54 +180,16 @@ class MinecraftClient(uint __protocol) : Client {
 		}
 	}
 
-	class Connection {
-
-		private Socket socket;
-
-		public this(Socket socket) {
-			this.socket = socket;
-		}
-
-	}
-
 }
 
-ubyte[] receive(Socket socket) {
-	ubyte[] buffer = new ubyte[4096];
-	ptrdiff_t recv = socket.receive(buffer);
-	if(recv > 0) {
-		size_t index = 0;
-		size_t length = varuint.decode(buffer, &index);
-		if(index <= recv && length > 0) {
-			if(recv - index >= length) return buffer[index..recv];
-			ubyte[] packet = buffer[index..recv].dup;
-			length -= (recv - index);
-			while(true) {
-				recv = socket.receive(buffer);
-				if(recv < 0) return [];
-				packet ~= buffer[0..recv].dup;
-				if(length <= recv) {
-					if(length != recv) {
-						writeln("too much bytes! ", recv - length, " too much");
-					}
-					return packet;
-				} else {
-					length -= recv;
-				}
-			}
-		}
-	}
-	return [];
-}
-
-ubyte[] receiveCompressed(Socket socket) {
-	ubyte[] packet = receive(socket);
+ubyte[] receiveCompressed(MinecraftStream stream) {
+	ubyte[] packet = stream.receive();
 	if(packet.length) {
 		if(packet[0] == 0) {
 			return packet[1..$];
 
 		} else {
-			size_t length = varuint.fromBuffer(packet);
+			uint length = varuint.fromBuffer(packet);
 			auto uc = new UnCompress(length);
 			packet = cast(ubyte[])uc.uncompress(packet.dup);
 			packet ~= cast(ubyte[])uc.flush();
