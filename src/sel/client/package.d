@@ -18,3 +18,5 @@ public import sel.client.client : Client;
 public import sel.client.minecraft : MinecraftClient;
 public import sel.client.pocket : PocketClient;
 public import sel.client.query : QueryType, query, minecraftQuery, pocketQuery;
+public import sel.client.stream : Stream;
+public import sel.client.util : handler;

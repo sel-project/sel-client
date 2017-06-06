@@ -14,12 +14,10 @@
  */
 module sel.client.util;
 
-import std.bitmanip : read;
 import std.conv : to;
 import std.regex : ctRegex, replaceAll;
-import std.socket : Socket;
 import std.string : strip;
-import std.traits : isNumeric, isIntegral, Parameters;
+import std.traits : Parameters;
 
 /**
  * Server's informations retrieved by a client's ping.
@@ -60,73 +58,34 @@ struct Server {
 	
 }
 
-class Stream(T) if(isNumeric!T || (is(typeof(T.encode)) && isIntegral!(Parameters!(T.encode)[0]))) {
+interface IHandler {
 
-	static if(isNumeric!T) {
-		enum requiredSize = T.sizeof;
-	} else {
-		enum requiredSize = 1;
+	public void handle(ubyte[] buffer);
+
+}
+
+class Handler(E...) : IHandler { //TODO validate packets
+
+	private E handlers;
+
+	public this(E handlers) {
+		this.handlers = handlers;
 	}
 
-	private Socket socket;
-	private ubyte[] buffer;
-	private ubyte[] next;
-	private size_t nextLength = 0;
-
-	public this(Socket socket, size_t bufferSize=4096) {
-		this.socket = socket;
-		this.buffer = new ubyte[bufferSize];
-	}
-
-	/**
-	 * Sends a buffer prefixing it with its length.
-	 * Returns: the number of bytes sent
-	 */
-	public ptrdiff_t send(ubyte[] payload) {
-		return this.socket.send(T.encode(payload.length.to!(Parameters!(T.encode)[0])) ~ payload); //TODO conversion
-	}
-
-	/**
-	 * Returns: an array of bytes as indicated by the length or an empty array on failure
-	 */
-	public @property ubyte[] receive() {
-		if(this.nextLength == 0) {
-			while(this.next.length < requiredSize) {
-				if(!this.read()) return [];
+	public override void handle(ubyte[] buffer) {
+		foreach(i, F; E) {
+			static if(is(typeof(Parameters!F[0].ID))) {
+				if(Parameters!F[0].ID == buffer[0]) {
+					this.handlers[i](Parameters!F[0].fromBuffer(buffer));
+				}
+			} else static if(is(Parameters!F[0] : ubyte[])) {
+				this.handlers[i](buffer);
 			}
-			static if(isNumeric!T) {
-				this.nextLength = read!T(this.next);
-			} else {
-				this.nextLength = T.fromBuffer(this.next);
-			}
-			if(this.nextLength == 0) {
-				// valid connection but length was 0
-				return [];
-			} else {
-				return this.receive();
-			}
-		} else {
-			while(this.next.length < this.nextLength) {
-				if(!this.read()) return [];
-			}
-			ubyte[] ret = this.next[0..this.nextLength];
-			this.next = this.next[this.nextLength..$];
-			this.nextLength = 0;
-			return ret;
 		}
 	}
 
-	/**
-	 * Returns: true if some data has been received, false if the connection has been closed or timed out
-	 */
-	private bool read() {
-		auto recv = this.socket.receive(this.buffer);
-		if(recv >= 0) {
-			this.next ~= this.buffer[0..recv].dup;
-			return true;
-		} else {
-			return false;
-		}
-	}
+}
 
+Handler!E handler(E...)(E handlers) {
+	return new Handler!E(handlers);
 }

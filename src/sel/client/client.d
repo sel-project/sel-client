@@ -1,10 +1,25 @@
-﻿module sel.client.client;
+﻿/*
+ * Copyright (c) 2017 SEL
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU Lesser General Public License for more details.
+ * 
+ */
+module sel.client.client;
 
 import std.conv : to;
 import std.datetime : Duration, dur;
 import std.socket : Address, InternetAddress;
 
-import sel.client.util : Server;
+import sel.client.stream : Stream;
+import sel.client.util : Server, IHandler;
 
 enum isSupported(string type, uint protocol) = __traits(compiles, { mixin("import sul.attributes." ~ type ~ to!string(protocol) ~ ";"); });
 
@@ -51,18 +66,18 @@ class Client {
 
 	protected abstract Server pingImpl(Address address, string ip, ushort port, Duration timeout);
 
-	public bool connect(Address address, Duration timeout=dur!"seconds"(5)) {
-		return this.connectImpl(address, address.toAddrString(), to!ushort(address.toPortString()), timeout);
+	public Stream connect(Address address, IHandler handler, Duration timeout=dur!"seconds"(5)) {
+		return this.connectImpl(address, address.toAddrString(), to!ushort(address.toPortString()), timeout, handler);
 	}
 
-	public bool connect(string ip, ushort port, Duration timeout=dur!"seconds"(5)) {
-		return this.connectImpl(new InternetAddress(ip, port), ip, port, timeout);
+	public Stream connect(string ip, ushort port, IHandler handler, Duration timeout=dur!"seconds"(5)) {
+		return this.connectImpl(new InternetAddress(ip, port), ip, port, timeout, handler);
 	}
 
-	public bool connect(string ip, Duration timeout=dur!"seconds"(5)) {
-		return this.connect(ip, this.defaultPort, timeout);
+	public Stream connect(string ip, IHandler handler, Duration timeout=dur!"seconds"(5)) {
+		return this.connect(ip, this.defaultPort, handler, timeout);
 	}
 
-	protected abstract bool connectImpl(Address address, string ip, ushort port, Duration timeout);
+	protected abstract Stream connectImpl(Address address, string ip, ushort port, Duration timeout, IHandler hanlder);
 
 }

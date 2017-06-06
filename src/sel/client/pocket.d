@@ -21,7 +21,8 @@ import std.socket;
 import std.string : split;
 
 import sel.client.client : isSupported, Client;
-import sel.client.util : Server;
+import sel.client.stream : Stream;
+import sel.client.util : Server, IHandler;
 
 import RaknetTypes = sul.protocol.raknet8.types;
 import Control = sul.protocol.raknet8.control;
@@ -74,8 +75,8 @@ class PocketClient(uint __protocol) : Client if(isSupported!("pocket", __protoco
 		return Server.init;
 	}
 
-	protected override bool connectImpl(Address address, string ip, ushort port, Duration timeout) {
-		return false;
+	protected override Stream connectImpl(Address address, string ip, ushort port, Duration timeout, IHandler handler) {
+		return null;
 	}
 
 }
