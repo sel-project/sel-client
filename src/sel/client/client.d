@@ -18,8 +18,8 @@ import std.conv : to;
 import std.datetime : Duration, dur;
 import std.socket : Address, InternetAddress;
 
-import sel.client.stream : Stream;
 import sel.client.util : Server, IHandler;
+import sel.stream : Stream;
 
 enum isSupported(string type, uint protocol) = __traits(compiles, { mixin("import sul.attributes." ~ type ~ to!string(protocol) ~ ";"); });
 

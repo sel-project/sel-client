@@ -15,258 +15,197 @@
 module sel.client.minecraft;
 
 import std.conv : to;
-import std.datetime : Duration, StopWatch, dur;
-import std.json : JSONValue, JSON_TYPE, parseJSON;
-import std.net.curl : HTTP, post;
+import std.datetime : Duration, StopWatch;
 import std.random : uniform;
 import std.socket;
-import std.uuid : UUID, parseUUID;
-import std.zlib : Compress, UnCompress;
+import std.string : split;
 
 import sel.client.client : isSupported, Client;
-import sel.client.stream : Stream, LengthStream;
 import sel.client.util : Server, IHandler;
+import sel.stream : Stream;
 
-import sul.utils.var : varuint;
+debug import std.stdio : writeln;
 
-import std.stdio : writeln;
+import RaknetTypes = sul.protocol.raknet8.types;
+import Control = sul.protocol.raknet8.control;
+import Encapsulated = sul.protocol.raknet8.encapsulated;
+import Unconnected = sul.protocol.raknet8.unconnected;
 
-private alias MinecraftStream = LengthStream!varuint;
+enum __magic = cast(ubyte[16])x"00 FF FF 00 FE FE FE FE FD FD FD FD 12 34 56 78";
 
-private class MinecraftCompressionStream : MinecraftStream {
-
-	private immutable size_t thresold;
-
-	public this(Socket socket, size_t thresold) {
+class RaknetStream : Stream {
+	
+	private Address address;
+	private immutable size_t mtu;
+	
+	private ubyte[] buffer;
+	
+	private uint send_count = 0;
+	
+	public this(Socket socket, Address address, size_t mtu) {
 		super(socket);
-		this.thresold = thresold;
+		this.address = address;
+		this.mtu = mtu;
+		this.buffer = new ubyte[mtu + 128];
 	}
-
+	
 	public override ptrdiff_t send(ubyte[] buffer) {
-		if(buffer.length >= this.thresold) {
-			auto compress = new Compress();
-			auto data = compress.compress(buffer);
-			data ~= compress.flush();
-			buffer = varuint.encode(buffer.length.to!uint) ~ cast(ubyte[])data;
+		return this.sendRaknet(ubyte(254) ~ buffer);
+	}
+	
+	public ptrdiff_t sendRaknet(ubyte[] buffer) {
+		if(buffer.length > mtu) {
+			writeln("buffer is too long!");
+			return 0;
 		} else {
-			buffer = ubyte.init ~ buffer;
+			auto packet = new Control.Encapsulated(this.send_count, RaknetTypes.Encapsulation(64, cast(ushort)(buffer.length*8), this.send_count, 0, ubyte(0), RaknetTypes.Split.init, buffer));
+			this.send_count++;
+			return this.socket.sendTo(packet.encode(), this.address);
 		}
-		return super.send(buffer);
 	}
-
+	
 	public override ubyte[] receive() {
-		ubyte[] buffer = super.receive();
-		uint length = varuint.fromBuffer(buffer);
-		if(length != 0) {
-			// compressed
-			//TODO add an option to disable compression or discard compressed packets
-			auto uncompress = new UnCompress(length);
-			buffer = cast(ubyte[])uncompress.uncompress(buffer.dup);
-			buffer ~= cast(ubyte[])uncompress.flush();
+		auto recv = this.socket.receiveFrom(this.buffer, this.address);
+		if(recv >= 0) {
+			switch(this.buffer[0]) {
+				case Control.Ack.ID:
+					auto ack = Control.Ack.fromBuffer(this.buffer);
+					//TODO remove from the waiting_ack queue
+					return receive();
+				case Control.Nack.ID:
+					// unused
+					return receive();
+				case 128:..case 143:
+					auto enc = Control.Encapsulated.fromBuffer(this.buffer[0..recv]);
+					if(enc.encapsulation.info & 16) {
+						//TODO handle splitted packets
+						break;
+					} else {
+						writeln(enc.encapsulation.payload);
+						return enc.encapsulation.payload;
+					}
+				default:
+					break;
+			}
 		}
-		return buffer;
+		return [];
 	}
-
+	
 }
 
-class MinecraftClient(uint __protocol) : Client if(isSupported!("minecraft", __protocol)) {
-
+class MinecraftClient(uint __protocol) : Client if(isSupported!("pocket", __protocol)) {
+	
 	public static string randomUsername() {
-		enum char[] pool = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_".dup;
-		char[] ret = new char[uniform!"[]"(3, 16)];
+		enum char[] pool = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ".dup;
+		char[] ret = new char[uniform!"[]"(1, 15)];
 		foreach(ref c ; ret) {
 			c = pool[uniform(0, $)];
 		}
 		return ret.idup;
 	}
-
-	mixin("import Status = sul.protocol.minecraft" ~ to!string(__protocol) ~ ".status;");
-	mixin("import Login = sul.protocol.minecraft" ~ to!string(__protocol) ~ ".login;");
-
-	mixin("public import Clientbound = sul.protocol.minecraft" ~ to!string(__protocol) ~ ".clientbound;");
-	mixin("public import Serverbound = sul.protocol.minecraft" ~ to!string(__protocol) ~ ".serverbound;");
-
-	private string _lasterror;
-
-	private string accessToken;
-	private UUID uuid;
-
+	
+	mixin("import Play = sul.protocol.pocket" ~ to!string(__protocol) ~ ".play;");
+	mixin("import Types = sul.protocol.pocket" ~ to!string(__protocol) ~ ".types;");
+	
+	alias Clientbound = FilterPackets!("CLIENTBOUND", Play.Packets);
+	alias Serverbound = FilterPackets!("SERVERBOUND", Play.Packets);
+	
 	public this(string name) {
 		super(name);
 	}
-
-	public this(string email, string password) {
-		// authenticate user
-		JSONValue[string] payload;
-		payload["agent"] = ["name": JSONValue("Minecraft"), "version": JSONValue(1)];
-		payload["username"] = email;
-		payload["password"] = password;
-		auto response = postJSON("https://authserver.mojang.com/authenticate", JSONValue(payload));
-		if(response.type == JSON_TYPE.OBJECT) {
-			auto at = "accessToken" in response;
-			auto sp = "selectedProfile" in response;
-			if(at && at.type == JSON_TYPE.STRING && sp && sp.type == JSON_TYPE.OBJECT) {
-				this.accessToken = at.str;
-				auto profile = (*sp).object;
-				email = profile["name"].str;
-				this.uuid = parseUUID(profile["id"].str);
-			}
-		}
-		this(email);
-	}
-
+	
 	public this() {
 		this(randomUsername());
 	}
-
+	
 	public override pure nothrow @property @safe @nogc ushort defaultPort() {
-		return ushort(25565);
+		return ushort(19132);
 	}
-
-	public final pure nothrow @property @safe @nogc string lastError() {
-		return this._lasterror;
-	}
-
+	
 	protected override Server pingImpl(Address address, string ip, ushort port, Duration timeout) {
-		Socket socket = new TcpSocket(address.addressFamily);
+		Socket socket = new UdpSocket(address.addressFamily);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, timeout);
-		socket.connect(address);
-		socket.blocking = true;
-		MinecraftStream stream = new MinecraftStream(socket);
-		// require status
-		stream.send(new Status.Handshake(__protocol, ip, port, Status.Handshake.STATUS).encode());
-		stream.send(new Status.Request().encode());
-		ubyte[] packet = stream.receive();
-		if(packet.length && packet[0] == Status.Response.ID) {
-			auto json = parseJSON(Status.Response.fromBuffer(packet).json);
-			if(json.type == JSON_TYPE.OBJECT) {
-				Server server;
-				auto description = "description" in json;
-				auto version_ = "version" in json;
-				auto players = "players" in json;
-				auto favicon = "favicon" in json;
-				if(description) {
-					server = Server(chatToString(*description), 0, 0, 0, 0);
-				}
-				if(players && players.type == JSON_TYPE.OBJECT) {
-					auto online = "online" in *players;
-					auto max = "max" in *players;
-					if(online && online.type == JSON_TYPE.INTEGER && max && max.type == JSON_TYPE.INTEGER) {
-						server.online = cast(uint)online.integer;
-						server.max = cast(uint)max.integer;
-					}
-				}
-				if(version_ && version_.type == JSON_TYPE.OBJECT) {
-					auto protocol = "protocol" in *version_;
-					if(protocol && protocol.type == JSON_TYPE.INTEGER) {
-						server.protocol = cast(uint)protocol.integer;
-					}
-				}
-				if(favicon && favicon.type == JSON_TYPE.STRING) {
-					server.favicon = favicon.str;
-				}
-				// ping
-				StopWatch timer;
-				timer.start();
-				stream.send(new Status.Latency(0).encode());
-				packet = stream.receive();
-				if(packet.length == 9 && packet[0] == Status.Latency.ID) {
-					timer.stop();
-					server.ping = timer.peek.msecs;
-					socket.close();
-					return server;
-				}
+		StopWatch timer;
+		timer.start();
+		socket.sendTo(new Unconnected.Ping(0, __magic, 0).encode(), address);
+		ubyte[] buffer = new ubyte[512];
+		if(socket.receiveFrom(buffer, address) > 0 && buffer[0] == Unconnected.Pong.ID) {
+			timer.stop();
+			auto spl = Unconnected.Pong.fromBuffer(buffer).status.split(";");
+			if(spl.length >= 6 && spl[0] == "MCPE") {
+				return Server(spl[1], to!uint(spl[2]), to!int(spl[4]), to!int(spl[5]), timer.peek.msecs);
 			}
 		}
-		socket.close();
 		return Server.init;
 	}
-
+	
 	protected override Stream connectImpl(Address address, string ip, ushort port, Duration timeout, IHandler handler) {
-		Socket socket = new TcpSocket(address.addressFamily);
-		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
+		ubyte[] buffer = new ubyte[2048];
+		ptrdiff_t recv;
+		Socket socket = new UdpSocket(address.addressFamily);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, timeout);
-		socket.connect(address);
-		socket.blocking = true;
-		MinecraftStream stream = new MinecraftStream(socket);
-		// handshake
-		stream.send(new Status.Handshake(__protocol, ip, port, Status.Handshake.LOGIN).encode());
-		stream.send(new Login.LoginStart(this.name).encode());
-		ubyte[] packet = stream.receive();
-		if(packet.length) {
-			if(packet[0] == Login.EncryptionRequest.ID) {
-				if(this.accessToken.length) {
-					//TODO create shared secret and do auth request to sessionserver
-				}
-				writeln(Login.EncryptionRequest.fromBuffer(packet));
-				this._lasterror = "Encryption required";
-			} else if(packet[0] == Login.SetCompression.ID) {
-				stream = new MinecraftCompressionStream(socket, Login.SetCompression.fromBuffer(packet).thresold);
-				packet = stream.receive();
-				if(packet.length) {
-					if(packet[0] == Login.Disconnect.ID) {
-						this._lasterror = "Disconnected: " ~ chatToString(parseJSON(Login.Disconnect.fromBuffer(packet).reason));
-					} else if(packet[0] == Login.LoginSuccess.ID) {
-						auto ls = Login.LoginSuccess.fromBuffer(packet);
-						if(ls.username == this.name) {
-							this.uuid = parseUUID(ls.uuid);
-							import std.concurrency;
-							spawn(&startGameLoop, cast(shared)stream, cast(shared)handler);
-							return stream;
-						} else {
-							this._lasterror = "Username mismatch";
+		foreach(mtu ; [2000, 1700, 1400, 1000, 500, 500]) {
+			socket.sendTo(new Unconnected.OpenConnectionRequest1(__magic, 8, new ubyte[mtu]).encode(), address);
+		}
+		recv = socket.receiveFrom(buffer, address);
+		if(recv > 0 && buffer[0] == Unconnected.OpenConnectionReply1.ID) {
+			auto reply1 = Unconnected.OpenConnectionReply1.fromBuffer(buffer);
+			if(reply1.mtuLength <= 2000 && reply1.mtuLength >= 500) {
+				buffer = new ubyte[reply1.mtuLength + 100];
+				socket.sendTo(new Unconnected.OpenConnectionRequest2(__magic, RaknetTypes.Address.init, reply1.mtuLength, 0).encode(), address);
+				do {
+					recv = socket.receiveFrom(buffer, address);
+				} while(recv > 0 && buffer[0] != Unconnected.OpenConnectionReply2.ID);
+				if(recv > 0) {
+					auto reply2 = Unconnected.OpenConnectionReply2.fromBuffer(buffer);
+					writeln(reply2);
+					// start encapsulation
+					auto stream = new RaknetStream(socket, address, reply1.mtuLength);
+					stream.sendRaknet(new Encapsulated.ClientConnect(0, 0).encode());
+					buffer = stream.receive();
+					if(buffer.length && buffer[0] == Encapsulated.ServerHandshake.ID) {
+						auto sh = Encapsulated.ServerHandshake.fromBuffer(buffer);
+						stream.sendRaknet(new Encapsulated.ClientHandshake(sh.clientAddress, sh.systemAddresses, sh.pingId, 0).encode());
+						// start new tick-based thread
+						{
+							bool connected = true;
+							while(connected) {
+								//TODO receive from other thread
+								//TODO receive from socket (and do ack/nack, split management, handlers call)
+								//TODO flush packets (queued from send method)
+								//TODO wait ~50 ms
+							}
 						}
-					} else {
-						with(Login) this._lasterror = "Unexpected packet: " ~ to!string(packet[0]) ~ " when expecting " ~ to!string(Disconnect.ID) ~ " or " ~ to!string(LoginSuccess.ID);
 					}
 				}
 			}
 		}
-		socket.close();
 		return null;
 	}
+	
+}
 
-	private static void startGameLoop(shared MinecraftStream _stream, shared IHandler _handler) {
-		auto stream = cast()_stream;
-		auto handler = cast()_handler;
-		stream.socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, dur!"msecs"(0)); // connection is closed when socket is
-		while(true) {
-			auto packet = stream.receive();
-			if(packet.length) {
-				if(packet[0] == Clientbound.KeepAlive.ID) {
-					stream.send(new Serverbound.KeepAlive(Clientbound.KeepAlive.fromBuffer(packet).id).encode());
-				} else {
-					handler.handle(packet);
-				}
-			} else {
-				// socket closed or packet with length 0
+private struct FilterPackets(string property, E...) {
+	@disable this();
+	alias F = FilterPacketsImpl!(property, 0, E);
+	mixin((){
+			string ret;
+			foreach(i, P; F) {
+				ret ~= "alias " ~ P.stringof ~ "=F[" ~ to!string(i) ~ "];";
 			}
+			return ret;
+		}());
+}
+
+private template FilterPacketsImpl(string property, size_t index, E...) {
+	static if(index < E.length) {
+		static if(mixin("E[index]." ~ property)) {
+			alias FilterPacketsImpl = FilterPacketsImpl!(property, index+1, E);
+		} else {
+			alias FilterPacketsImpl = FilterPacketsImpl!(property, index, E[0..index], E[index+1..$]);
 		}
+	} else {
+		alias FilterPacketsImpl = E;
 	}
-
-}
-
-private JSONValue postJSON(string url, JSONValue json) {
-	HTTP http = HTTP();
-	http.addRequestHeader("Content-Type", "application/json");
-	return parseJSON(post(url, json.toString(), http).idup);
-}
-
-private string chatToString(JSONValue json) {
-	if(json.type == JSON_TYPE.OBJECT) {
-		auto text = "text" in json;
-		if(text && text.type == JSON_TYPE.STRING) {
-			return text.str;
-		}
-	} else if(json.type == JSON_TYPE.STRING) {
-		return json.str;
-	}
-	return "";
-}
-
-unittest {
-
-	auto minecraft = new MinecraftClient!316("unittest");
-
 }
