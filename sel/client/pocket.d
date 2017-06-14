@@ -12,7 +12,7 @@
  * See the GNU Lesser General Public License for more details.
  * 
  */
-module sel.client.minecraft;
+module sel.client.pocket;
 
 import std.conv : to, ConvException;
 import std.datetime : Duration, StopWatch;
@@ -93,13 +93,13 @@ class RaknetStream : Stream {
 	
 }
 
-class MinecraftClient(uint __protocol) : Client if(isSupported!("pocket", __protocol)) {
+class PocketClient(uint __protocol) : Client if(isSupported!("pocket", __protocol)) {
 	
 	public static string randomUsername() {
 		enum char[] pool = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ".dup;
 		char[] ret = new char[uniform!"[]"(1, 15)];
-		foreach(ref c ; ret) {
-			c = pool[uniform(0, $)];
+		foreach(i, ref c; ret) {
+			c = pool[uniform(0, (i==0 || i==ret.length-1 ? $-1 : $))];
 		}
 		return ret.idup;
 	}
@@ -133,7 +133,7 @@ class MinecraftClient(uint __protocol) : Client if(isSupported!("pocket", __prot
 		}
 		return Server.init;
 	}
-
+	
 	protected override string rawPingImpl(Address address, string ip, ushort port, Duration timeout) {
 		Socket socket = new UdpSocket(address.addressFamily);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);

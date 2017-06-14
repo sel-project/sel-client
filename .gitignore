@@ -1,5 +1,6 @@
 *.exe
+*.lib
 *.userprefs
 *.selections.json
 /.dub
-src/app.d
+app.d

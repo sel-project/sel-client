@@ -107,13 +107,13 @@ const(Query) query(string ip, ushort port, QueryType type=QueryType.full) {
 }
 
 /// ditto
-const(Query) minecraftQuery(string ip, QueryType type=QueryType.full) {
-	return query(ip, ushort(19132), type);
+const(Query) javaQuery(string ip, QueryType type=QueryType.full) {
+	return query(ip, ushort(25565), type);
 }
 
 /// ditto
-const(Query) javaQuery(string ip, QueryType type=QueryType.full) {
-	return query(ip, ushort(25565), type);
+const(Query) pocketQuery(string ip, QueryType type=QueryType.full) {
+	return query(ip, ushort(19132), type);
 }
 
 struct Plugin {

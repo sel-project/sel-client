@@ -16,6 +16,6 @@ module sel.client;
 
 public import sel.client.client : Client;
 public import sel.client.java : JavaClient;
-public import sel.client.minecraft : MinecraftClient;
-public import sel.client.query : QueryType, query, javaQuery, minecraftQuery;
+public import sel.client.pocket : PocketClient;
+public import sel.client.query : QueryType, query, javaQuery, pocketQuery;
 public import sel.client.util : handler;
