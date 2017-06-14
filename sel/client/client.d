@@ -66,6 +66,30 @@ class Client {
 
 	protected abstract Server pingImpl(Address address, string ip, ushort port, Duration timeout);
 
+	/**
+	 * Pings a server and returns the obtained data without parsing it.
+	 * Example:
+	 * ---
+	 * assert(minecraft.rawPing("play.lbsg.net").startsWith("MCPE;"));
+	 * assert(java.rawPing("mc.hypixel.net").startsWith("{")); // json
+	 * ---
+	 */
+	public final string rawPing(Address address, Duration timeout=dur!"seconds"(5)) {
+		return this.rawPingImpl(address, address.toAddrString(), to!ushort(address.toPortString()), timeout);
+	}
+	
+	/// ditto
+	public final string rawPing(string ip, ushort port, Duration timeout=dur!"seconds"(5)) {
+		return this.rawPingImpl(new InternetAddress(ip, port), ip, port, timeout);
+	}
+	
+	/// ditto
+	public final string rawPing(string ip, Duration timeout=dur!"seconds"(5)) {
+		return this.rawPing(ip, this.defaultPort, timeout);
+	}
+
+	protected abstract string rawPingImpl(Address address, string ip, ushort port, Duration timeout);
+
 	public Stream connect(Address address, IHandler handler, Duration timeout=dur!"seconds"(5)) {
 		return this.connectImpl(address, address.toAddrString(), to!ushort(address.toPortString()), timeout, handler);
 	}

@@ -145,6 +145,25 @@ class JavaClient(uint __protocol) : Client if(isSupported!("minecraft", __protoc
 		return Server.init;
 	}
 	
+	protected override string rawPingImpl(Address address, string ip, ushort port, Duration timeout) {
+		Socket socket = new TcpSocket(address.addressFamily);
+		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
+		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, timeout);
+		socket.connect(address);
+		socket.blocking = true;
+		auto stream = new LengthPrefixedStream!varuint(new TcpStream(socket));
+		// require status
+		stream.send(new Status.Handshake(__protocol, ip, port, Status.Handshake.STATUS).encode());
+		stream.send(new Status.Request().encode());
+		ubyte[] packet = stream.receive();
+		socket.close();
+		if(packet.length && packet[0] == Status.Response.ID) {
+			return Status.Response.fromBuffer(packet).json;
+		} else {
+			return "";
+		}
+	}
+	
 	protected override Stream connectImpl(Address address, string ip, ushort port, Duration timeout, IHandler handler) {
 		Socket socket = new TcpSocket(address.addressFamily);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
@@ -155,34 +174,48 @@ class JavaClient(uint __protocol) : Client if(isSupported!("minecraft", __protoc
 		// handshake
 		stream.send(new Status.Handshake(__protocol, ip, port, Status.Handshake.LOGIN).encode());
 		stream.send(new Login.LoginStart(this.name).encode());
-		ubyte[] packet = stream.receive();
-		if(packet.length) {
-			if(packet[0] == Login.EncryptionRequest.ID) {
-				if(this.accessToken.length) {
-					//TODO create shared secret and do auth request to sessionserver
-				}
-				this._lasterror = "Encryption required";
-			} else if(packet[0] == Login.SetCompression.ID) {
-				stream = new CompressedStream!varuint(stream, Login.SetCompression.fromBuffer(packet).thresold);
-				packet = stream.receive();
-				if(packet.length) {
-					if(packet[0] == Login.Disconnect.ID) {
-						this._lasterror = "Disconnected: " ~ chatToString(parseJSON(Login.Disconnect.fromBuffer(packet).reason));
-					} else if(packet[0] == Login.LoginSuccess.ID) {
-						auto ls = Login.LoginSuccess.fromBuffer(packet);
-						if(ls.username == this.name) {
-							this.uuid = parseUUID(ls.uuid);
-							import std.concurrency;
-							spawn(&startGameLoop, cast(shared)stream, cast(shared)handler);
-							return stream;
-						} else {
-							this._lasterror = "Username mismatch";
-						}
-					} else {
-						with(Login) this._lasterror = "Unexpected packet: " ~ to!string(packet[0]) ~ " when expecting " ~ to!string(Disconnect.ID) ~ " or " ~ to!string(LoginSuccess.ID);
-					}
-				}
+		//
+		bool delegate(ubyte[])[ubyte] expected = [
+			Login.Disconnect.ID: (ubyte[] buffer){
+				this._lasterror = "Disconnected: " ~ chatToString(parseJSON(Login.Disconnect.fromBuffer!false(buffer).reason));
+				return false;
+			},
+			Login.EncryptionRequest.ID: (ubyte[] buffer){
+				this._lasterror = "Authentication required";
+				return false;
+			},
+			Login.SetCompression.ID: (ubyte[] buffer){
+				stream = new CompressedStream!varuint(stream, Login.SetCompression.fromBuffer!false(buffer).thresold);
+				return true;
 			}
+		];
+		ubyte[] buffer;
+		do {
+			buffer = stream.receive();
+			if(buffer.length) {
+				auto del = buffer[0] in expected;
+				if(del) {
+					(*del)(buffer[1..$]);
+					expected.remove(buffer[0]);
+				} else {
+					break;
+				}
+			} else {
+				this._lasterror = "Unexpected empty packet";
+			}
+		} while(buffer.length);
+		if(buffer[0] == Login.LoginSuccess.ID) {
+			auto ls = Login.LoginSuccess.fromBuffer(buffer);
+			if(ls.username == this.name) {
+				this.uuid = parseUUID(ls.uuid); //TODO may throw an exception
+				import std.concurrency;
+				spawn(&startGameLoop, cast(shared)stream, cast(shared)handler);
+				return stream;
+			} else {
+				this._lasterror = "Username mismatch (" ~ this.name ~ " != " ~ ls.username ~ ")";
+			}
+		} else {
+			this._lasterror = "Unexpected packet " ~ to!string(buffer[0]) ~ " when expecting " ~ to!string(expected.keys)[1..$-1];
 		}
 		socket.close();
 		return null;
@@ -199,9 +232,13 @@ class JavaClient(uint __protocol) : Client if(isSupported!("minecraft", __protoc
 					stream.send(new Serverbound.KeepAlive(Clientbound.KeepAlive.fromBuffer(packet).id).encode());
 				} else {
 					handler.handle(packet);
+					if(packet[0] == Clientbound.Disconnect.ID) {
+						break;
+					}
 				}
 			} else {
 				// socket closed or packet with length 0
+				break;
 			}
 		}
 	}
@@ -216,10 +253,20 @@ private JSONValue postJSON(string url, JSONValue json) {
 
 private string chatToString(JSONValue json) {
 	if(json.type == JSON_TYPE.OBJECT) {
+		string ret;
 		auto text = "text" in json;
 		if(text && text.type == JSON_TYPE.STRING) {
-			return text.str;
+			ret ~= text.str;
 		}
+		auto extra = "extra" in json;
+		if(extra && extra.type == JSON_TYPE.ARRAY) {
+			foreach(element ; extra.array) {
+				if(element.type == JSON_TYPE.OBJECT) {
+					ret ~= chatToString(element);
+				}
+			}
+		}
+		return ret;
 	} else if(json.type == JSON_TYPE.STRING) {
 		return json.str;
 	}

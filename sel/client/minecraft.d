@@ -14,7 +14,7 @@
  */
 module sel.client.minecraft;
 
-import std.conv : to;
+import std.conv : to, ConvException;
 import std.datetime : Duration, StopWatch;
 import std.random : uniform;
 import std.socket;
@@ -123,21 +123,28 @@ class MinecraftClient(uint __protocol) : Client if(isSupported!("pocket", __prot
 	}
 	
 	protected override Server pingImpl(Address address, string ip, ushort port, Duration timeout) {
+		StopWatch timer;
+		timer.start();
+		auto spl = this.rawPingImpl(address, ip, port, timeout).split(";");
+		if(spl.length >= 6 && spl[0] == "MCPE") {
+			try {
+				return Server(spl[1], to!uint(spl[2]), to!int(spl[4]), to!int(spl[5]), timer.peek.msecs);
+			} catch(ConvException) {}
+		}
+		return Server.init;
+	}
+
+	protected override string rawPingImpl(Address address, string ip, ushort port, Duration timeout) {
 		Socket socket = new UdpSocket(address.addressFamily);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, timeout);
-		StopWatch timer;
-		timer.start();
 		socket.sendTo(new Unconnected.Ping(0, __magic, 0).encode(), address);
 		ubyte[] buffer = new ubyte[512];
 		if(socket.receiveFrom(buffer, address) > 0 && buffer[0] == Unconnected.Pong.ID) {
-			timer.stop();
-			auto spl = Unconnected.Pong.fromBuffer(buffer).status.split(";");
-			if(spl.length >= 6 && spl[0] == "MCPE") {
-				return Server(spl[1], to!uint(spl[2]), to!int(spl[4]), to!int(spl[5]), timer.peek.msecs);
-			}
+			return Unconnected.Pong.fromBuffer(buffer).status;
+		} else {
+			return "";
 		}
-		return Server.init;
 	}
 	
 	protected override Stream connectImpl(Address address, string ip, ushort port, Duration timeout, IHandler handler) {
