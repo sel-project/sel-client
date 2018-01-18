@@ -7,3 +7,5 @@ dependency "sel-stream" version="~>0.0.1"
 //dependency "sel-stream" path="../../GitHub/sel-stream"
 importPaths "."
 sourcePaths "."
+
+dflags "-op"
