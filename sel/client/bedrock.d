@@ -18,7 +18,7 @@
  * Authors: Kripth
  * Source: $(HTTP github.com/sel-project/sel-client/sel/client/pocket.d, sel/client/pocket.d)
  */
-module sel.client.pocket;
+module sel.client.bedrock;
 
 import std.conv : to, ConvException;
 import std.datetime : Duration, StopWatch;
@@ -28,7 +28,7 @@ import std.string : split;
 
 import sel.client.client : isSupported, Client;
 import sel.client.util : Server, IHandler;
-import sel.stream : Stream;
+import sel.net : Stream, RaknetStream;
 
 debug import std.stdio : writeln;
 
@@ -39,67 +39,9 @@ import Unconnected = sul.protocol.raknet8.unconnected;
 
 enum __magic = cast(ubyte[16])x"00 FF FF 00 FE FE FE FE FD FD FD FD 12 34 56 78";
 
-class RaknetStream : Stream {
-	
-	private Address address;
-	private immutable size_t mtu;
-	
-	private ubyte[] buffer;
-	
-	private uint send_count = 0;
-	
-	public this(Socket socket, Address address, size_t mtu) {
-		super(socket);
-		this.address = address;
-		this.mtu = mtu;
-		this.buffer = new ubyte[mtu + 128];
-	}
-	
-	public override ptrdiff_t send(ubyte[] buffer) {
-		return this.sendRaknet(ubyte(254) ~ buffer);
-	}
-	
-	public ptrdiff_t sendRaknet(ubyte[] buffer) {
-		if(buffer.length > mtu) {
-			writeln("buffer is too long!");
-			return 0;
-		} else {
-			auto packet = new Control.Encapsulated(this.send_count, RaknetTypes.Encapsulation(64, cast(ushort)(buffer.length*8), this.send_count, 0, ubyte(0), RaknetTypes.Split.init, buffer));
-			this.send_count++;
-			return this.socket.sendTo(packet.encode(), this.address);
-		}
-	}
-	
-	public override ubyte[] receive() {
-		auto recv = this.socket.receiveFrom(this.buffer, this.address);
-		if(recv >= 0) {
-			switch(this.buffer[0]) {
-				case Control.Ack.ID:
-					auto ack = Control.Ack.fromBuffer(this.buffer);
-					//TODO remove from the waiting_ack queue
-					return receive();
-				case Control.Nack.ID:
-					// unused
-					return receive();
-				case 128:..case 143:
-					auto enc = Control.Encapsulated.fromBuffer(this.buffer[0..recv]);
-					if(enc.encapsulation.info & 16) {
-						//TODO handle splitted packets
-						break;
-					} else {
-						writeln(enc.encapsulation.payload);
-						return enc.encapsulation.payload;
-					}
-				default:
-					break;
-			}
-		}
-		return [];
-	}
-	
-}
+enum type(uint protocol) = protocol < 120 ? "pocket" : "bedrock";
 
-class PocketClient(uint __protocol) : Client if(isSupported!("pocket", __protocol)) {
+class BedrockClient(uint __protocol) : Client if(isSupported!(type!__protocol, __protocol)) {
 	
 	public static string randomUsername() {
 		enum char[] pool = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ".dup;
@@ -110,8 +52,8 @@ class PocketClient(uint __protocol) : Client if(isSupported!("pocket", __protoco
 		return ret.idup;
 	}
 	
-	mixin("import Play = sul.protocol.pocket" ~ to!string(__protocol) ~ ".play;");
-	mixin("import Types = sul.protocol.pocket" ~ to!string(__protocol) ~ ".types;");
+	mixin("import Play = sul.protocol." ~ type!__protocol ~ to!string(__protocol) ~ ".play;");
+	mixin("import Types = sul.protocol." ~ type!__protocol ~ to!string(__protocol) ~ ".types;");
 	
 	alias Clientbound = FilterPackets!("CLIENTBOUND", Play.Packets);
 	alias Serverbound = FilterPackets!("SERVERBOUND", Play.Packets);
@@ -175,11 +117,11 @@ class PocketClient(uint __protocol) : Client if(isSupported!("pocket", __protoco
 					writeln(reply2);
 					// start encapsulation
 					auto stream = new RaknetStream(socket, address, reply1.mtuLength);
-					stream.sendRaknet(new Encapsulated.ClientConnect(0, 0).encode());
+					stream.send(new Encapsulated.ClientConnect(0, 0).encode());
 					buffer = stream.receive();
 					if(buffer.length && buffer[0] == Encapsulated.ServerHandshake.ID) {
 						auto sh = Encapsulated.ServerHandshake.fromBuffer(buffer);
-						stream.sendRaknet(new Encapsulated.ClientHandshake(sh.clientAddress, sh.systemAddresses, sh.pingId, 0).encode());
+						stream.send(new Encapsulated.ClientHandshake(sh.clientAddress, sh.systemAddresses, sh.pingId, 0).encode());
 						// start new tick-based thread
 						{
 							bool connected = true;

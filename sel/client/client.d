@@ -25,7 +25,7 @@ import std.datetime : Duration, dur;
 import std.socket : Address, InternetAddress;
 
 import sel.client.util : Server, IHandler;
-import sel.stream : Stream;
+import sel.net : Stream;
 
 enum isSupported(string type, uint protocol) = __traits(compiles, { mixin("import sul.attributes." ~ type ~ to!string(protocol) ~ ";"); });
 

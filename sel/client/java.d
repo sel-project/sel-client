@@ -31,13 +31,13 @@ import std.zlib : Compress, UnCompress;
 
 import sel.client.client : isSupported, Client;
 import sel.client.util : Server, IHandler;
-import sel.stream : Stream, TcpStream, ModifierStream, LengthPrefixedStream, CompressedStream;
+import sel.net : Stream, TcpStream, ModifierStream, LengthPrefixedStream, CompressedStream;
 
 import sul.utils.var : varuint;
 
 debug import std.stdio : writeln;
 
-class JavaClient(uint __protocol) : Client if(isSupported!("minecraft", __protocol)) {
+class JavaClient(uint __protocol) : Client if(isSupported!("java", __protocol)) {
 	
 	public static string randomUsername() {
 		enum char[] pool = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_".dup;
@@ -48,11 +48,11 @@ class JavaClient(uint __protocol) : Client if(isSupported!("minecraft", __protoc
 		return ret.idup;
 	}
 	
-	mixin("import Status = sul.protocol.minecraft" ~ to!string(__protocol) ~ ".status;");
-	mixin("import Login = sul.protocol.minecraft" ~ to!string(__protocol) ~ ".login;");
+	mixin("import Status = sul.protocol.java" ~ to!string(__protocol) ~ ".status;");
+	mixin("import Login = sul.protocol.java" ~ to!string(__protocol) ~ ".login;");
 	
-	mixin("public import Clientbound = sul.protocol.minecraft" ~ to!string(__protocol) ~ ".clientbound;");
-	mixin("public import Serverbound = sul.protocol.minecraft" ~ to!string(__protocol) ~ ".serverbound;");
+	mixin("public import Clientbound = sul.protocol.java" ~ to!string(__protocol) ~ ".clientbound;");
+	mixin("public import Serverbound = sul.protocol.java" ~ to!string(__protocol) ~ ".serverbound;");
 	
 	private string _lasterror;
 	
