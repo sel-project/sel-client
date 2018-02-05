@@ -29,9 +29,10 @@
 module sel.client.bedrock;
 
 import std.conv : to, ConvException;
-import std.datetime : Duration, StopWatch;
+import std.datetime : Duration;
+import std.datetime.stopwatch : StopWatch;
 import std.random : uniform;
-import std.socket;
+import std.socket : Socket, UdpSocket, SocketOptionLevel, SocketOption, Address;
 import std.string : split;
 
 import sel.client.client : isSupported, Client;
@@ -83,8 +84,10 @@ class BedrockClient(uint __protocol) : Client if(isSupported!(type!__protocol, _
 		timer.start();
 		auto spl = this.rawPingImpl(address, ip, port, timeout).split(";");
 		if(spl.length >= 6 && spl[0] == "MCPE") {
+			uint latency;
+			timer.peek.split!"msecs"(latency);
 			try {
-				return Server(spl[1], to!uint(spl[2]), to!int(spl[4]), to!int(spl[5]), timer.peek.msecs);
+				return Server(spl[1], to!uint(spl[2]), to!int(spl[4]), to!int(spl[5]), latency);
 			} catch(ConvException) {}
 		}
 		return Server.init;

@@ -29,11 +29,12 @@
 module sel.client.java;
 
 import std.conv : to;
-import std.datetime : Duration, StopWatch, dur;
+import std.datetime : Duration, dur;
+import std.datetime.stopwatch : StopWatch;
 import std.json : JSONValue, JSON_TYPE, parseJSON;
 import std.net.curl : HTTP, post;
 import std.random : uniform;
-import std.socket;
+import std.socket : Socket, TcpSocket, SocketOptionLevel, SocketOption, Address;
 import std.uuid : UUID, parseUUID;
 import std.zlib : Compress, UnCompress;
 
@@ -149,7 +150,7 @@ class JavaClient(uint __protocol) : Client if(isSupported!("java", __protocol)) 
 				packet = stream.receive();
 				if(packet.length == 9 && packet[0] == Status.Latency.ID) {
 					timer.stop();
-					server.ping = timer.peek.msecs;
+					timer.peek.split!"msecs"(server.ping);
 					socket.close();
 					return server;
 				}

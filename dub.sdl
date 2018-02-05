@@ -3,6 +3,6 @@ description "Libraries for the creation of Minecraft (Bedrock Engine) and Minecr
 authors "sel-project"
 license "MIT"
 dependency "sel-net" version="~>0.2.1"
-dependency "sel-utils" version="==1.4.1"
+dependency "sel-utils" version="==1.4.2"
 importPaths "."
 sourcePaths "."

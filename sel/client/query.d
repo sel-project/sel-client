@@ -30,7 +30,8 @@ module sel.client.query;
 
 import std.bitmanip : nativeToBigEndian, peek;
 import std.conv : to;
-import std.datetime : StopWatch, dur;
+import std.datetime : dur;
+import std.datetime.stopwatch : StopWatch;
 import std.socket;
 import std.string : indexOf, lastIndexOf, strip, split;
 import std.system : Endian;
@@ -51,7 +52,9 @@ const(Query) query(Address address, QueryType type=QueryType.full) {
 		timer.start();
 		socket.sendTo(cast(ubyte[])[254, 253, 0, 0, 0, 0, 0] ~ nativeToBigEndian(to!int(cast(string)buffer[5..recv-1])) ~ new ubyte[type==QueryType.full?4:0], address);
 		if((recv = socket.receiveFrom(buffer, address)) > 5 && buffer[0..5] == [0, 0, 0, 0, 0]) {
+			uint latency;
 			timer.stop();
+			timer.peek.split!"msecs"(latency);
 			size_t index = 5;
 			string readString() {
 				size_t next = index;
@@ -68,7 +71,7 @@ const(Query) query(Address address, QueryType type=QueryType.full) {
 				string max = readString();
 				ushort port = peek!(ushort, Endian.littleEndian)(buffer, &index);
 				string ip = readString();
-				return Query(Server(motd, 0, to!int(online), to!int(max), timer.peek.msecs), ip, port, gametype, map);
+				return Query(Server(motd, 0, to!int(online), to!int(max), latency), ip, port, gametype, map);
 			} else {
 				string[string] data;
 				string next;
@@ -83,7 +86,7 @@ const(Query) query(Address address, QueryType type=QueryType.full) {
 				auto port = "hostport" in data;
 				auto ip = "hostip" in data;
 				if(motd && online && max && port && ip) {
-					Query ret = Query(Server(*motd, 0, to!int(*online), to!int(*max), timer.peek.msecs), *ip, to!ushort(*port), gametype ? *gametype : "SMP", map ? *map : "");
+					Query ret = Query(Server(*motd, 0, to!int(*online), to!int(*max), latency), *ip, to!ushort(*port), gametype ? *gametype : "SMP", map ? *map : "");
 					auto plugins = "plugins" in data;
 					if(plugins) {
 						ptrdiff_t i = indexOf(*plugins, ":");
