@@ -14,9 +14,9 @@
  */
 /**
  * Copyright: 2017-2018 sel-project
- * License: LGPL-3.0
+ * License: MIT
  * Authors: Kripth
- * Source: $(HTTP github.com/sel-project/sel-client/sel/client/pocket.d, sel/client/pocket.d)
+ * Source: $(HTTP github.com/sel-project/sel-client/sel/client/bedrock.d, sel/client/bedrock.d)
  */
 module sel.client.bedrock;
 

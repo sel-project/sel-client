@@ -14,7 +14,7 @@
  */
 /**
  * Copyright: 2017-2018 sel-project
- * License: LGPL-3.0
+ * License: MIT
  * Authors: Kripth
  * Source: $(HTTP github.com/sel-project/sel-client/sel/client/java.d, sel/client/java.d)
  */
