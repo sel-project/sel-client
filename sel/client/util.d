@@ -30,15 +30,19 @@ module sel.client.util;
 
 import std.conv : to;
 import std.regex : ctRegex, replaceAll;
-import std.string : strip;
 import std.traits : Parameters;
+
+import sel.client.client : Connection;
+import sel.format : unformat;
+
+import xbuffer : Buffer;
 
 /**
  * Server's informations retrieved by a client's ping.
  */
 struct Server {
 
-	bool valid = false;
+	bool success = false;
 	
 	string motd;
 	string rawMotd;
@@ -51,8 +55,8 @@ struct Server {
 	ulong ping;
 	
 	public this(string motd, uint protocol, int online, int max, ulong ping) {
-		this.valid = true;
-		this.motd = motd.replaceAll(ctRegex!"§[0-9a-fk-or]", "").strip;
+		this.success = true;
+		this.motd = motd.unformat;
 		this.rawMotd = motd;
 		this.protocol = protocol;
 		this.online = online;
@@ -61,20 +65,20 @@ struct Server {
 	}
 	
 	public inout string toString() {
-		if(this.valid) {
+		if(this.success) {
 			return "Server(motd: " ~ this.motd ~ ", protocol: " ~ to!string(this.protocol) ~ ", players: " ~ to!string(this.online) ~ "/" ~ to!string(this.max) ~ ", ping: " ~ to!string(this.ping) ~ " ms)";
 		} else {
 			return "Server()";
 		}
 	}
 
-	alias valid this;
+	alias success this;
 	
 }
 
 interface IHandler {
 
-	public void handle(ubyte[] buffer);
+	public void handle(Connection connection, ubyte[] buffer);
 
 }
 
@@ -86,15 +90,32 @@ class Handler(E...) : IHandler { //TODO validate packets
 		this.handlers = handlers;
 	}
 
-	public override void handle(ubyte[] buffer) {
-		foreach(i, F; E) {
-			static if(is(typeof(Parameters!F[0].ID))) {
-				if(Parameters!F[0].ID == buffer[0]) {
-					this.handlers[i](Parameters!F[0].fromBuffer(buffer));
+	public override void handle(Connection connection, ubyte[] buffer) {
+		this.handleImpl(connection, new Buffer(buffer));
+	}
+
+	private void handleImpl(Connection connection, Buffer buffer) {
+		switch(buffer.peek!ubyte()) {
+			foreach(i, F; E) {
+				static if(is(typeof(Parameters!F[0].ID))) {
+					case Parameters!F[0].ID: {
+						alias Packet = Parameters!F[0];
+						auto packet = new Packet();
+						packet.decode(buffer);
+						this.handlers[i](packet);
+						return;
+					}
+				} else static if(Parameters!F.length == 2 && is(Parameters!F[0] : Connection) && is(typeof(Parameters!F[1].ID))) {
+					case Parameters!F[1].ID: {
+						alias Packet = Parameters!F[1];
+						auto packet = new Packet();
+						packet.decode(buffer);
+						this.handlers[i](connection, packet);
+						return;
+					}
 				}
-			} else static if(is(Parameters!F[0] : ubyte[])) {
-				this.handlers[i](buffer);
 			}
+			default: break;
 		}
 	}
 

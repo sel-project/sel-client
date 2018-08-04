@@ -28,8 +28,8 @@
  */
 module sel.client;
 
-public import sel.client.bedrock : BedrockClient;
-public import sel.client.client : Client;
-public import sel.client.java : JavaClient;
-public import sel.client.query : QueryType, query, javaQuery, pocketQuery;
-public import sel.client.util : handler;
+public import sel.client.bedrock : GenericBedrockClient, BedrockClient;
+public import sel.client.client : Client, Connection;
+public import sel.client.java : GenericJavaClient, JavaClient;
+public import sel.client.query : QueryType, query, bedrockQuery, javaQuery;
+public import sel.client.util : Server, handler;

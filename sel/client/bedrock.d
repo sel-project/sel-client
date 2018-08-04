@@ -32,25 +32,21 @@ import std.conv : to, ConvException;
 import std.datetime : Duration;
 import std.datetime.stopwatch : StopWatch;
 import std.random : uniform;
-import std.socket : Socket, UdpSocket, SocketOptionLevel, SocketOption, Address;
+import std.socket : getAddress;
 import std.string : split;
 
-import sel.client.client : isSupported, Client;
+import libasync;
+
+import sel.client.client : isSupported, Client, Connection;
 import sel.client.util : Server, IHandler;
-import sel.net : Stream, RaknetStream;
+
+import xbuffer;
 
 debug import std.stdio : writeln;
 
-import RaknetTypes = sul.protocol.raknet8.types;
-import Control = sul.protocol.raknet8.control;
-import Encapsulated = sul.protocol.raknet8.encapsulated;
-import Unconnected = sul.protocol.raknet8.unconnected;
+import Raknet = sel.raknet.packet;
 
-enum __magic = cast(ubyte[16])x"00 FF FF 00 FE FE FE FE FD FD FD FD 12 34 56 78";
-
-enum type(uint protocol) = protocol < 120 ? "pocket" : "bedrock";
-
-class BedrockClient(uint __protocol) : Client if(isSupported!(type!__protocol, __protocol)) {
+class GenericBedrockClient : Client {
 	
 	public static string randomUsername() {
 		enum char[] pool = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ".dup;
@@ -61,53 +57,89 @@ class BedrockClient(uint __protocol) : Client if(isSupported!(type!__protocol, _
 		return ret.idup;
 	}
 	
-	mixin("import Play = sul.protocol." ~ type!__protocol ~ to!string(__protocol) ~ ".play;");
-	mixin("import Types = sul.protocol." ~ type!__protocol ~ to!string(__protocol) ~ ".types;");
-	
-	alias Clientbound = FilterPackets!("CLIENTBOUND", Play.Packets);
-	alias Serverbound = FilterPackets!("SERVERBOUND", Play.Packets);
-	
-	public this(string name) {
-		super(name);
+	public this(EventLoop eventLoop, string name) {
+		super(eventLoop, name);
 	}
 	
+	public this(EventLoop eventLoop) {
+		this(eventLoop, randomUsername());
+	}
+
+	public this(string name) {
+		this(getThreadEventLoop());
+	}
+
 	public this() {
-		this(randomUsername());
+		this(getThreadEventLoop());
 	}
 	
 	public override pure nothrow @property @safe @nogc ushort defaultPort() {
 		return ushort(19132);
 	}
 	
-	protected override Server pingImpl(Address address, string ip, ushort port, Duration timeout) {
+	protected override void pingImpl(string ip, ushort port, Duration timeout, void delegate(Server) callback) {
 		StopWatch timer;
 		timer.start();
-		auto spl = this.rawPingImpl(address, ip, port, timeout).split(";");
-		if(spl.length >= 6 && spl[0] == "MCPE") {
-			uint latency;
-			timer.peek.split!"msecs"(latency);
-			try {
-				return Server(spl[1], to!uint(spl[2]), to!int(spl[4]), to!int(spl[5]), latency);
-			} catch(ConvException) {}
-		}
-		return Server.init;
+		this.rawPingImpl(ip, port, timeout, (string str){
+			if(str !is null) {
+				string[] spl = str.split(";");
+				if(spl.length >= 6 && spl[0] == "MCPE") {
+					uint latency;
+					timer.peek.split!"msecs"(latency);
+					try {
+						callback(Server(spl[1], to!uint(spl[2]), to!int(spl[4]), to!int(spl[5]), latency));
+						return;
+					} catch(ConvException) {}
+				}
+			}
+			callback(Server.init);
+		});
 	}
 	
-	protected override string rawPingImpl(Address address, string ip, ushort port, Duration timeout) {
-		Socket socket = new UdpSocket(address.addressFamily);
-		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
-		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, timeout);
-		socket.sendTo(new Unconnected.Ping(0, __magic, 0).encode(), address);
-		ubyte[] buffer = new ubyte[512];
-		if(socket.receiveFrom(buffer, address) > 0 && buffer[0] == Unconnected.Pong.ID) {
-			return Unconnected.Pong.fromBuffer(buffer).status;
-		} else {
-			return "";
+	protected override void rawPingImpl(string ip, ushort port, Duration timeout, void delegate(string) callback) {
+
+		bool success = false;
+
+		NetworkAddress address = NetworkAddress(getAddress(ip, port)[0]);
+		AsyncUDPSocket socket = new AsyncUDPSocket(this.eventLoop);
+
+		AsyncTimer timer = new AsyncTimer(this.eventLoop);
+		timer.duration = timeout;
+		timer.run({
+			if(!success) callback(null);
+		});
+
+		import std.stdio : writeln;
+
+		writeln(address);
+
+		void run(UDPEvent event) {
+			if(event == UDPEvent.READ) {
+				static ubyte[] buffer = new ubyte[512];
+				NetworkAddress _address;
+				socket.recvFrom(buffer, _address);
+				if(address == _address) {
+					if(buffer[0] == Raknet.UnconnectedPong.ID) {
+						try {
+							auto packet = new Raknet.UnconnectedPong();
+							packet.autoDecode(buffer);
+							success = true;
+							callback(packet.status);
+						} catch(BufferOverflowException) {}
+					}
+				}
+			}
 		}
+
+		socket.host("0.0.0.0", port);
+		socket.run(&run);
+
+		socket.sendTo(new Raknet.UnconnectedPing(0, 0).autoEncode(), address);
+
 	}
 	
-	protected override Stream connectImpl(Address address, string ip, ushort port, Duration timeout, IHandler handler) {
-		ubyte[] buffer = new ubyte[2048];
+	protected override Connection connectImpl(string ip, ushort port, Duration timeout, IHandler handler) {
+		/*ubyte[] buffer = new ubyte[2048];
 		ptrdiff_t recv;
 		Socket socket = new UdpSocket(address.addressFamily);
 		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, timeout);
@@ -146,22 +178,32 @@ class BedrockClient(uint __protocol) : Client if(isSupported!(type!__protocol, _
 					}
 				}
 			}
-		}
+		}*/
 		return null;
 	}
 	
+}
+
+class BedrockClient(uint __protocol) : GenericBedrockClient if(isSupported!("bedrock", __protocol)) {
+	
+	mixin("import Play = soupply." ~ type!__protocol ~ to!string(__protocol) ~ ".protocol.play;");
+	mixin("import Types = soupply." ~ type!__protocol ~ to!string(__protocol) ~ ".types;");
+	
+	alias Clientbound = FilterPackets!("CLIENTBOUND", Play.Packets);
+	alias Serverbound = FilterPackets!("SERVERBOUND", Play.Packets);
+
 }
 
 private struct FilterPackets(string property, E...) {
 	@disable this();
 	alias F = FilterPacketsImpl!(property, 0, E);
 	mixin((){
-			string ret;
-			foreach(i, P; F) {
-				ret ~= "alias " ~ P.stringof ~ "=F[" ~ to!string(i) ~ "];";
-			}
-			return ret;
-		}());
+		string ret;
+		foreach(i, P; F) {
+			ret ~= "alias " ~ P.stringof ~ "=F[" ~ to!string(i) ~ "];";
+		}
+		return ret;
+	}());
 }
 
 private template FilterPacketsImpl(string property, size_t index, E...) {

@@ -32,26 +32,54 @@ import std.conv : to;
 import std.datetime : Duration, dur;
 import std.socket : Address, InternetAddress;
 
+import libasync;
+
 import sel.client.util : Server, IHandler;
-import sel.net : Stream;
 
-enum isSupported(string type, uint protocol) = __traits(compiles, { mixin("import sul.attributes." ~ type ~ to!string(protocol) ~ ";"); });
+/**
+ * Indicates whether a protocol is supported for the given edition
+ * of the game.
+ * Example:
+ * ---
+ * assert(isSupported!("java", 393));
+ * assert(!isSupported!("bedrock", 15));
+ * ---
+ */
+enum isSupported(string type, uint protocol) = __traits(compiles, { mixin("import soupply." ~ type ~ to!string(protocol) ~ ";"); });
 
+/**
+ * Base class for a client that contains abstract ping and connection methods.
+ */
 class Client {
+
+	private EventLoop _eventLoop;
 
 	/**
 	 * Client's username used to connect to the server.
 	 */
 	public immutable string name;
 
-	public this(string name) {
+	public this(EventLoop eventLoop, string name) {
+		_eventLoop = eventLoop;
 		this.name = name;
+	}
+
+	/**
+	 * Gets the client's event loop. It should be looped when using
+	 * asynchronous methods, like asyncPing and connect.
+	 * Example:
+	 * ---
+	 * client.eventLoop.loop();
+	 * ---
+	 */
+	public final @property EventLoop eventLoop() pure nothrow @safe @nogc {
+		return _eventLoop;
 	}
 
 	/**
 	 * Gets the game's default port.
 	 */
-	public abstract pure nothrow @property @safe @nogc ushort defaultPort();
+	public abstract @property ushort defaultPort() pure nothrow @safe @nogc;
 
 	/**
 	 * Pings a server to retrieve basic informations like MOTD, protocol used
@@ -64,13 +92,15 @@ class Client {
 	 * client.ping("localhost", dur!"seconds"(1));
 	 * ---
 	 */
-	public final const(Server) ping(Address address, Duration timeout=dur!"seconds"(5)) {
-		return this.pingImpl(address, address.toAddrString(), to!ushort(address.toPortString()), timeout);
-	}
-
-	/// ditto
 	public final const(Server) ping(string ip, ushort port, Duration timeout=dur!"seconds"(5)) {
-		return this.pingImpl(new InternetAddress(ip, port), ip, port, timeout);
+		bool done = false;
+		Server server;
+		this.asyncPing(ip, port, timeout, (Server s){
+			done = true;
+			server = s;
+		});
+		while(!done) this.eventLoop.loop();
+		return server;
 	}
 
 	/// ditto
@@ -78,23 +108,54 @@ class Client {
 		return this.ping(ip, this.defaultPort, timeout);
 	}
 
-	protected abstract Server pingImpl(Address address, string ip, ushort port, Duration timeout);
+	/**
+	 * Asynchrounously pings a server and calls the callback delegate when done.
+	 * Example:
+	 * ---
+	 * client.asyncPing("example.com", (Server server){
+	 *    writeln(server);
+	 * });
+	 * ---
+	 */
+	public final void asyncPing(string ip, ushort port, Duration timeout, void delegate(Server) callback) {
+		this.pingImpl(ip, port, timeout, callback);
+	}
+
+	/// ditto
+	public final void asyncPing(string ip, Duration timeout, void delegate(Server) callback) {
+		this.asyncPing(ip, this.defaultPort, callback);
+	}
+
+	/// ditto
+	public final void asyncPing(string ip, ushort port, void delegate(Server) callback) {
+		this.asyncPing(ip, port, dur!"seconds"(5), callback);
+	}
+
+	/// ditto
+	public final void asyncPing(string ip, void delegate(Server) callback) {
+		this.asyncPing(ip, dur!"seconds"(5), callback);
+	}
+
+	protected abstract void pingImpl(string ip, ushort port, Duration timeout, void delegate(Server) callback);
 
 	/**
-	 * Pings a server and returns the obtained data without parsing it.
+	 * Pings a server and returns the obtained data without parsing it,
+	 * or null on failure (not an empty string).
 	 * Example:
 	 * ---
 	 * assert(minecraft.rawPing("play.lbsg.net").startsWith("MCPE;"));
 	 * assert(java.rawPing("mc.hypixel.net").startsWith("{")); // json
 	 * ---
 	 */
-	public final string rawPing(Address address, Duration timeout=dur!"seconds"(5)) {
-		return this.rawPingImpl(address, address.toAddrString(), to!ushort(address.toPortString()), timeout);
-	}
-	
-	/// ditto
 	public final string rawPing(string ip, ushort port, Duration timeout=dur!"seconds"(5)) {
-		return this.rawPingImpl(new InternetAddress(ip, port), ip, port, timeout);
+		bool done = false;
+		string ret;
+		this.asyncRawPing(ip, port, timeout, (string r){
+			done = true;
+			ret = r;
+		});
+		while(!done) this.eventLoop.loop();
+		return ret;
 	}
 	
 	/// ditto
@@ -102,20 +163,98 @@ class Client {
 		return this.rawPing(ip, this.defaultPort, timeout);
 	}
 
-	protected abstract string rawPingImpl(Address address, string ip, ushort port, Duration timeout);
-
-	public Stream connect(Address address, IHandler handler, Duration timeout=dur!"seconds"(5)) {
-		return this.connectImpl(address, address.toAddrString(), to!ushort(address.toPortString()), timeout, handler);
+	/**
+	 * Asynchronously pings a server and calls the callback delegate when done.
+	 * The result given in the callback is the same as the one given
+	 * in the `rawPing` method.
+	 */
+	public final void asyncRawPing(string ip, ushort port, Duration timeout, void delegate(string) callback) {
+		this.rawPingImpl(ip, port, timeout, callback);
 	}
 
-	public Stream connect(string ip, ushort port, IHandler handler, Duration timeout=dur!"seconds"(5)) {
-		return this.connectImpl(new InternetAddress(ip, port), ip, port, timeout, handler);
+	/// ditto
+	public final void asyncRawPing(string ip, Duration timeout, void delegate(string) callback) {
+		this.asyncRawPing(ip, this.defaultPort, callback);
+	}
+	
+	/// ditto
+	public final void asyncRawPing(string ip, ushort port, void delegate(string) callback) {
+		this.asyncRawPing(ip, port, dur!"seconds"(5), callback);
+	}
+	
+	/// ditto
+	public final void asyncRawPing(string ip, void delegate(string) callback) {
+		this.asyncRawPing(ip, dur!"seconds"(5), callback);
 	}
 
-	public Stream connect(string ip, IHandler handler, Duration timeout=dur!"seconds"(5)) {
+	protected abstract void rawPingImpl(string ip, ushort port, Duration timeout, void delegate(string) callback);
+
+	/**
+	 * Establishes an asynchronous connection between the client and the server.
+	 * Example:
+	 * ---
+	 * Connection conn = client.connect("mc.example.com", handler());
+	 * while(conn.connected) client.eventLoop.loop();
+	 * ---
+	 */
+	public Connection connect(string ip, ushort port, IHandler handler, Duration timeout=dur!"seconds"(5)) {
+		return this.connectImpl(ip, port, timeout, handler);
+	}
+
+	/// ditto
+	public Connection connect(string ip, IHandler handler, Duration timeout=dur!"seconds"(5)) {
 		return this.connect(ip, this.defaultPort, handler, timeout);
 	}
 
-	protected abstract Stream connectImpl(Address address, string ip, ushort port, Duration timeout, IHandler hanlder);
+	protected abstract Connection connectImpl(string ip, ushort port, Duration timeout, IHandler hanlder);
+
+}
+
+/**
+ * Representation of a connection started with the client's connect method.
+ */
+class Connection {
+
+	enum Status {
+
+		joining,
+		joined,
+		unimplemented,
+		disconnected,
+		authRequired,
+
+	}
+
+	/**
+	 * Indicates whether the client has still an open connection
+	 * with the server.
+	 */
+	bool connected = true;
+
+	/**
+	 * Indicates the status of the connection or the result of
+	 * the connection.
+	 */
+	Status status;
+	string message;
+
+	void delegate() onClientJoin, onClientLeft;
+
+	this(Status status, string message="") {
+		this.status = status;
+		this.message = message;
+		this.onClientJoin = {};
+		this.onClientLeft = {};
+	}
+
+	/**
+	 * Sends a text message to the server.
+	 */
+	public void sendMessage(string message) {}
+
+	/**
+	 * Stops the connection.
+	 */
+	public void kill() {}
 
 }

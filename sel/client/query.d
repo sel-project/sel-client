@@ -38,6 +38,8 @@ import std.system : Endian;
 
 import sel.client.util : Server;
 
+import xbuffer;
+
 enum QueryType { basic,	full }
 
 const(Query) query(Address address, QueryType type=QueryType.full) {
@@ -129,7 +131,7 @@ const(Query) javaQuery(string ip, QueryType type=QueryType.full) {
 }
 
 /// ditto
-const(Query) pocketQuery(string ip, QueryType type=QueryType.full) {
+const(Query) bedrockQuery(string ip, QueryType type=QueryType.full) {
 	return query(ip, ushort(19132), type);
 }
 
@@ -155,7 +157,7 @@ struct Query {
 	string[] players;
 
 	public inout string toString() {
-		if(this.server.valid) {
+		if(this.server.success) {
 			return "Query(" ~ this.server.toString()[7..$-1] ~ ", ip: " ~ this.ip ~ ", port: " ~ to!string(this.port) ~ ", gametype: " ~ this.gametype ~ ", map: " ~ this.map ~ ")";
 		} else {
 			return "Query()";
