@@ -21,7 +21,7 @@
  *
  */
 /**
- * Copyright: 2017-2018 sel-project
+ * Copyright: 2017-2019 sel-project
  * License: MIT
  * Authors: Kripth
  * Source: $(HTTP github.com/sel-project/sel-client/sel/client/query.d, sel/client/query.d)
