@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 sel-project
+ * Copyright (c) 2017-2020 sel-project
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
  *
  */
 /**
- * Copyright: 2017-2019 sel-project
+ * Copyright: 2017-2020 sel-project
  * License: MIT
  * Authors: Kripth
  * Source: $(HTTP github.com/sel-project/sel-client/sel/client/util.d, sel/client/util.d)
